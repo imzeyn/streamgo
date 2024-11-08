@@ -21,6 +21,8 @@ func (s *HTTPServer) AddOnePath(p *Path) *HTTPServer{
 			GET: true,
 		}
 	}
+	
+	
 	s.makeTemp(p, "")
 	return s
 }
@@ -46,7 +48,14 @@ func (s *HTTPServer) makeTemp(p *Path, parent string) {
 
 	if p.Include != nil{
 		for _, v := range p.Include {
-			s.makeTemp(v, key)			
+			
+			if len(v.AllowedMethods) == 0 {
+				v.AllowedMethods = map[HTTPMethod]bool{
+					GET: true,
+				}
+			}
+			
+			s.makeTemp(v, key)
 		}
 	}
 }
@@ -228,6 +237,7 @@ func (s *HTTPServer) on404(request *HTTPRequest, response *HTTPResponse){
 	}
 	response.String("")
 }
+
 func (s *HTTPServer) on403(request *HTTPRequest, response *HTTPResponse){
 	response.Status(403)
 	if s.On403 != nil{

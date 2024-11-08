@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -32,32 +33,50 @@ func (r *HTTPRequest) Header(name string) string{
 	return r.HTTP.Header.Get(name)
 }
 
-func (r HTTPRequest) IP() string{
-	forwarded := r.HTTP.Header.Get("X-Forwarded-For")
-	
-	if forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		return strings.TrimSpace(ips[0])
-	}
+func (r *HTTPRequest) IP() string {
+    
+    forwarded := r.HTTP.Header.Get("X-Forwarded-For")
+    if forwarded != "" {
+        ips := strings.Split(forwarded, ",")
+        ip := strings.TrimSpace(ips[0])
+        if net.ParseIP(ip) != nil {
+            return ip 
+        }
+    }
    
-	realIP := r.HTTP.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
+    realIP := r.HTTP.Header.Get("X-Real-IP")
+    if realIP != "" {
+        if net.ParseIP(realIP) != nil {
+            return realIP 
+        }
+    }
    
-	ip, _, err := net.SplitHostPort(r.HTTP.RemoteAddr)
-	if err != nil {
-		return ""
-	}
-	
-	return ip
+    ip, _, err := net.SplitHostPort(r.HTTP.RemoteAddr)
+    if err != nil {
+        return ""
+    }
+    
+    return ip
 }
 
-func (r HTTPRequest) Device() (string, string){
+
+func (r *HTTPRequest) Method() string{
+    return r.HTTP.Method
+}
+
+func (r *HTTPRequest) Query(name string) string{
+    return r.HTTP.URL.Query().Get(name)
+}
+
+func (r *HTTPRequest) Querys() url.Values{
+    return r.HTTP.URL.Query()
+}
+
+func (r *HTTPRequest) Device() (string, string){
 	userAgent := r.HTTP.Header.Get("User-Agent")
 
-    browser := "unknown Browser"
-    os := "Unknown OS"
+    browser := ""
+    os := ""
 
     if strings.Contains(userAgent, "Firefox/") {
         browser = "Mozilla Firefox"
@@ -86,7 +105,7 @@ func (r HTTPRequest) Device() (string, string){
 	return browser, os
 }
 
-func (r HTTPRequest) JSON() (*interface{}, error){
+func (r *HTTPRequest) JSON() (*interface{}, error){
 	defer r.HTTP.Body.Close()
 
 	var data interface{}
@@ -100,7 +119,7 @@ func (r HTTPRequest) JSON() (*interface{}, error){
 	return &data, nil
 }
 
-func (r * HTTPRequest) Upload(to, name string) (bool, error) {
+func (r *HTTPRequest) Upload(to, name string) (bool, error) {
 	mr, err := r.HTTP.MultipartReader()
 	if err != nil {
 		return false, err
