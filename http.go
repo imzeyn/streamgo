@@ -1,7 +1,6 @@
 package streamgo
 
 import (
-	"fmt"
 	"math/rand"
 	"net/http"
 	"regexp"
@@ -219,7 +218,6 @@ func (s *HTTPServer) getPathAndParams(u string) (*Path, map[string] string){
 				lenParts := len(nonEmptyParts)
 
 				if lenParts != 0{
-					fmt.Println(lenParts, v.paramList)	 
 					for id, index := range v.paramList {
 						if index <= (lenParts - 1) {
 							params[id] = nonEmptyParts[index]
