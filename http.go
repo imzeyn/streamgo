@@ -7,21 +7,19 @@ import (
 	"strings"
 )
 
-func (s *HTTPServer) AddPaths(p []*Path) *HTTPServer{
+func (s *HTTPServer) AddPaths(p []Path) *HTTPServer{
 	for _, v := range p {
 		s.AddOnePath(v)
 	}
-
 	return s
 }
 
-func (s *HTTPServer) AddOnePath(p *Path) *HTTPServer{
+func (s *HTTPServer) AddOnePath(p Path) *HTTPServer{
 	if len(p.AllowedMethods) == 0 {
 		p.AllowedMethods = map[HTTPMethod]bool{
 			GET: true,
 		}
 	}
-	
 	
 	s.makeTemp(p, "")
 	return s
@@ -32,7 +30,7 @@ func (s *HTTPServer) BuildPaths() *HTTPServer{
 	return s
 }
 
-func (s *HTTPServer) makeTemp(p *Path, parent string) {
+func (s *HTTPServer) makeTemp(p Path, parent string) {
 	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	id := make([]byte, 16)
 	for i := range id {
@@ -61,6 +59,7 @@ func (s *HTTPServer) makeTemp(p *Path, parent string) {
 }
 
 func (s *HTTPServer) buildTemps(){
+	re := regexp.MustCompile(`^(.*?){[^/]+}/`)
 	for key, v := range s.paths.temps {
 		fullName := s.paths.getTempPathFullName(key)
 
@@ -70,9 +69,11 @@ func (s *HTTPServer) buildTemps(){
 		}
 
 		reURL := ""
-		paramList := make(map[string]int)
+		paramList := map[string]int{}
 
-		for i, v := range strings.Split(fullName, "/") {
+		matches := re.FindStringSubmatch(fullName)
+		matchParam := strings.TrimPrefix(fullName, matches[1])
+		for i, v := range strings.Split(matchParam, "/") {
 			paramArr := singleBracePattern.FindStringSubmatch(v)
 			if len(paramArr) > 0{
 				paramName := paramArr[0]
@@ -91,14 +92,16 @@ func (s *HTTPServer) buildTemps(){
 				reURL += v + "/"
 			}
 		}
+
 		
-		s.paths.regex = append(s.paths.regex, rePath{
+		rePathData := rePath{
 			RegexName: *regexp.MustCompile( "^" + ClearURL(reURL) + "$" ),
 			FullName: fullName,
 			Path: v.Path,
 			paramList: paramList,
-		})
-		
+		}
+
+		s.paths.regex[matches[1]] = append(s.paths.regex[matches[1]], rePathData)
 	}
 
 	s.paths.temps = make(map[string]tempPaths)
@@ -173,7 +176,6 @@ func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket 
 	if webSocket{
 		conn, err := s.WebSocket.Upgrader.Upgrade(*w, r, nil)
 		
-		
 		ws := WSConnection{
 			Conn: conn,
 			Err: err,
@@ -188,33 +190,43 @@ func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket 
 func (s *HTTPServer) getPathAndParams(u string) (*Path, map[string] string){
 	params := make(map[string]string)
 	if v, ok := s.paths.static[u]; ok{
-		return v, params
+		return &v, params
 	}else{
-		
-		for _, v := range s.paths.regex {
-			if v.RegexName.MatchString(u) {  
-				paramURL := strings.Split(u, "/")  
+
+		for k, vP := range s.paths.regex {
+			if !strings.HasPrefix(u, k){
+				continue
+			}
+
+			paramStr :=  "/" + strings.TrimPrefix(u, k)
+			
+			for _, v := range vP {
 				
-				nonEmptyParams := make([]string, 0, len(paramURL))
-				for _, part := range paramURL {
-					trimmed := strings.TrimSpace(part)
+				if !v.RegexName.MatchString(paramStr) {  
+					continue
+				}
+				parts := strings.Split(paramStr, "/")
+
+				nonEmptyParts := []string{}
+				for _, v := range parts {
+					trimmed := strings.TrimSpace(v)
 					if trimmed != "" {
-						nonEmptyParams = append(nonEmptyParams, trimmed)
+						nonEmptyParts = append(nonEmptyParts, trimmed)
 					}
 				}
-		
-				paramLen := len(nonEmptyParams)
-				
-				for k, index := range v.paramList {
-					if paramLen > index-1 {
-						params[k] = nonEmptyParams[index-1] 
-					}
+
+				lenParts := len(nonEmptyParts)
+				if lenParts != 0{
+					for id, index := range v.paramList {
+						if index <= lenParts {
+							params[id] = nonEmptyParts[index]
+						}
+					}	
 				}
-		
-				return v.Path, params
+
+				return &v.Path, params
 			}
 		}
-
 	}
 
 	return nil, params

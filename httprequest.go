@@ -59,7 +59,6 @@ func (r *HTTPRequest) IP() string {
     return ip
 }
 
-
 func (r *HTTPRequest) Method() string{
     return r.HTTP.Method
 }

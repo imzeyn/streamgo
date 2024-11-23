@@ -22,9 +22,9 @@ type WSServer struct{
 }
 
 type serverPaths struct {
-	temps  map[string] tempPaths
-	static map[string]*Path
-	regex  [] rePath
+	temps  map[string]tempPaths
+	static map[string]Path
+	regex  map[string][]rePath
 }
 
 type Path struct {
@@ -33,24 +33,26 @@ type Path struct {
 	Handler        HTTPHandler
 	WSHandler      WSHandler
     AllowedMethods map[HTTPMethod]bool
-    Include        [] *Path
+    Include        []Path
     Additional     interface{}
 }
+
 type pathDetails struct{
     ID              string
     Name            string
     Additional      interface{}
 }
+
 type rePath struct{
     RegexName   regexp.Regexp
     FullName    string
     paramList   map[string]int
-    Path        *Path
+    Path        Path
 }
 
 type tempPaths struct{
     Parent     string
-    Path        *Path
+    Path       Path
 }
 
 type HTTPRequest struct{
