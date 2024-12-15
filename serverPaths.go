@@ -6,7 +6,7 @@ import (
 
 func (sp *serverPaths) getTempPathFullName(key string) string {
 	name := ""
-
+	
 	if sp.temps[key].Parent != "" {
 		name += sp.getTempPathFullName(sp.temps[key].Parent) + "/"
 	}

@@ -11,6 +11,27 @@ import (
 	"strings"
 )
 
+var (
+    browserMap map[string]string = map[string]string{
+        "Firefox/":  "Mozilla Firefox",
+        "Chrome/":   "Google Chrome",
+        "Safari/":   "Apple Safari",
+        "Edge/":     "Microsoft Edge",
+        "MSIE":      "Microsoft Internet Explorer",
+        "Trident/":  "Microsoft Internet Explorer",
+    }
+
+    osMap map[string]string = map[string]string{
+        "Windows NT": "Windows",
+        "Mac OS X":   "Mac OS X",
+        "Linux":      "Linux",
+        "Android":    "Android",
+        "iPhone":     "iOS",
+        "iPad":       "iOS",
+    }
+)
+
+
 func (r *HTTPRequest) Cookies() map[string]*http.Cookie {
 	cookies := make(map[string]*http.Cookie)
 	for _, cookie := range r.HTTP.Cookies() {
@@ -34,7 +55,6 @@ func (r *HTTPRequest) Header(name string) string{
 }
 
 func (r *HTTPRequest) IP() string {
-    
     forwarded := r.HTTP.Header.Get("X-Forwarded-For")
     if forwarded != "" {
         ips := strings.Split(forwarded, ",")
@@ -71,50 +91,47 @@ func (r *HTTPRequest) Querys() url.Values{
     return r.HTTP.URL.Query()
 }
 
-func (r *HTTPRequest) Device() (string, string){
+func (r *HTTPRequest) Device() (string, string) {
 	userAgent := r.HTTP.Header.Get("User-Agent")
+	
+    browser   := "Unknown Browser"
+	for key, value := range browserMap {
+		if strings.Contains(userAgent, key) {
+			if key == "Safari/" && strings.Contains(userAgent, "Chrome/") {
+				continue
+			}
+			browser = value
+			break
+		}
+	}
 
-    browser := ""
-    os := ""
-
-    if strings.Contains(userAgent, "Firefox/") {
-        browser = "Mozilla Firefox"
-    } else if strings.Contains(userAgent, "Chrome/") {
-        browser = "Google Chrome"
-    } else if strings.Contains(userAgent, "Safari/") && !strings.Contains(userAgent, "Chrome/") {
-        browser = "Apple Safari"
-    } else if strings.Contains(userAgent, "Edge/") {
-        browser = "Microsoft Edge"
-    } else if strings.Contains(userAgent, "MSIE") || strings.Contains(userAgent, "Trident/") {
-        browser = "Microsoft Internet Explorer"
-    }
-
-    if strings.Contains(userAgent, "Windows NT") {
-        os = "Windows"
-    } else if strings.Contains(userAgent, "Mac OS X") {
-        os = "Mac OS X"
-    } else if strings.Contains(userAgent, "Linux") {
-        os = "Linux"
-    } else if strings.Contains(userAgent, "Android") {
-        os = "Android"
-    } else if strings.Contains(userAgent, "iPhone") || strings.Contains(userAgent, "iPad") {
-        os = "iOS"
-    }
+	os := "Unknown OS"
+	for key, value := range osMap {
+		if strings.Contains(userAgent, key) {
+			os = value
+			break
+		}
+	}
 
 	return browser, os
 }
 
-func (r *HTTPRequest) JSON() (*interface{}, error){
-	defer r.HTTP.Body.Close()
-
-	var data interface{}
-	decoder := json.NewDecoder(r.HTTP.Body)
-    err := decoder.Decode(&data)
-    if err != nil {
-        return nil, err
-    }
  
+
+func (r *HTTPRequest) JSON(maxBodySize int64) (*interface{}, error) {
+	defer r.HTTP.Body.Close()
+	limitedBody := io.LimitReader(r.HTTP.Body, maxBodySize)
+	var data interface{}
 	
+    decoder := json.NewDecoder(limitedBody)
+	err := decoder.Decode(&data)
+	
+    if err != nil {
+		if err == io.EOF {
+			return &data, nil
+		}
+		return nil, err
+	}
 	return &data, nil
 }
 

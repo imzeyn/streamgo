@@ -25,7 +25,7 @@ var (
 )
 
 var (
-    ErrUploadExtMismatch = errors.New("invalid file extension")
-    ErrUploadSigMismatch  = errors.New("invalid signature")
-    ErrUploadFileMissing  = errors.New("file not found")
+    ErrUploadExtMismatch 	   = errors.New("invalid file extension")
+    ErrUploadSigMismatch  	   = errors.New("invalid signature")
+    ErrUploadFileMissing  	   = errors.New("file not found")
 )

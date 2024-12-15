@@ -79,6 +79,5 @@ func (m *MimeSignatureList) GetByExtension(name string) MimeSignatureList{
 			}
 		}
 	}
-
 	return list
 }

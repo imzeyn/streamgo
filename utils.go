@@ -1,16 +1,33 @@
 package streamgo
 
-import "strings"
+import "bytes"
 
 func ClearURL(s string) string {
-    var builder strings.Builder
-    builder.WriteString("/")
+	var builder bytes.Buffer
+	builder.Grow(len(s))
+	builder.WriteByte('/') 
 
-    for _, v := range strings.Split(s, "/") {
-        if strings.TrimSpace(v) != "" {
-            builder.WriteString(v + "/")
-        }
-    }
-	
-    return builder.String()
+	bytesSlice := []byte(s)
+	start := 0
+
+	for i := 0; i < len(bytesSlice); i++ {
+		b := bytesSlice[i]
+
+		if b == '/' || i == len(bytesSlice)-1 {
+ 
+			if i == len(bytesSlice)-1 && b != '/' {
+				i++
+			}
+
+			part := bytesSlice[start:i]
+			if len(bytes.TrimSpace(part)) > 0 {
+				builder.Write(part)
+				builder.WriteByte('/')
+			}
+
+			start = i + 1
+		}
+	}
+
+	return builder.String()
 }

@@ -7,11 +7,7 @@ import (
 
 func (resp *HTTPResponse) String(s string) (int, error){
 	wr := *resp.writer
-	
-	if wr.Header().Get("Content-Type") == ""{
-		wr.Header().Add("Content-Type", "text/html; charset=utf-8;")
-	}
-
+	wr.Header().Add("Content-Type", "text/html; charset=utf-8;")
 	return wr.Write([]byte(s))
 }
 
@@ -22,7 +18,11 @@ func (resp *HTTPResponse) JSON(w interface{}) error {
 	}
 
 	wr := *resp.writer
-	wr.Header().Add("Content-Type", "application/json; charset=utf-8;")
+	
+	if wr.Header().Get("Content-Type") == "" {
+		wr.Header().Add("Content-Type", "application/json; charset=utf-8")
+	}
+	
 	wr.Write(data)
 
 	return nil

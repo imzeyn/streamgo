@@ -8,18 +8,17 @@ import (
 )
 
 type HTTPServer struct {
-	Addr        string
-    WebSocket   *WSServer
-    Middleware  []HTTPMiddlewareHandler
-	paths       serverPaths
-    On403       HTTPHandler
-    On404       HTTPHandler
+    Middleware        []HTTPMiddlewareHandler
+	paths             serverPaths
+    On403             HTTPHandler
+    On404             HTTPHandler
 }
 
-type WSServer struct{
-    Perfix      string
+type WS struct{
+    Handler     WSHandler
     Upgrader    websocket.Upgrader
 }
+
 
 type serverPaths struct {
 	temps  map[string]tempPaths
@@ -31,7 +30,7 @@ type Path struct {
     ID             string
 	Name           string
 	Handler        HTTPHandler
-	WSHandler      WSHandler
+	WebSocket      WS
     AllowedMethods map[HTTPMethod]bool
     Include        []Path
     Additional     interface{}
@@ -59,11 +58,11 @@ type HTTPRequest struct{
     HTTP         *http.Request
     PathDetails  *pathDetails
     FullName     string
-    Params       *map[string]string
+    Params       map[string]string
 }
 
 type HTTPResponse struct{
-    writer  *http.ResponseWriter
+    writer   *http.ResponseWriter
 }
 
 type WSConnection struct{
@@ -71,6 +70,6 @@ type WSConnection struct{
     Err     error
 }
 
-type HTTPHandler func(request *HTTPRequest, response *HTTPResponse)
-type HTTPMiddlewareHandler func(request *HTTPRequest, response *HTTPResponse) bool
-type WSHandler   func(request *HTTPRequest, ws *WSConnection)
+type HTTPHandler            func(request *HTTPRequest, response *HTTPResponse)
+type HTTPMiddlewareHandler  func(request *HTTPRequest, response *HTTPResponse) bool
+type WSHandler              func(request *HTTPRequest, ws *WSConnection)

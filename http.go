@@ -1,8 +1,11 @@
 package streamgo
 
 import (
+	"log"
 	"math/rand"
+	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -20,6 +23,12 @@ func (s *HTTPServer) AddOnePath(p Path) *HTTPServer{
 			GET: true,
 		}
 	}
+
+	if p.WebSocket.Handler != nil{
+		if p.WebSocket.Upgrader.Error == nil{
+			p.WebSocket.Upgrader.Error = onWSUpgradeErr
+		}
+	}
 	
 	s.makeTemp(p, "")
 	return s
@@ -32,6 +41,7 @@ func (s *HTTPServer) BuildPaths() *HTTPServer{
 
 func (s *HTTPServer) makeTemp(p Path, parent string) {
 	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	
 	id := make([]byte, 16)
 	for i := range id {
 		id[i] = charset[rand.Intn(len(charset))]
@@ -60,6 +70,7 @@ func (s *HTTPServer) makeTemp(p Path, parent string) {
 
 func (s *HTTPServer) buildTemps(){
 	re := regexp.MustCompile(`^(.*?){[^/]+}/`)
+
 	for key, v := range s.paths.temps {
 		fullName := s.paths.getTempPathFullName(key)
 
@@ -73,6 +84,7 @@ func (s *HTTPServer) buildTemps(){
 
 		matches := re.FindStringSubmatch(fullName)
 		matchParam := strings.TrimPrefix(fullName, matches[1])
+		
 		for i, v := range strings.Split(matchParam, "/") {
 			paramArr := singleBracePattern.FindStringSubmatch(v)
 			if len(paramArr) > 0{
@@ -93,7 +105,6 @@ func (s *HTTPServer) buildTemps(){
 			}
 		}
 
-		
 		rePathData := rePath{
 			RegexName: *regexp.MustCompile( "^" + ClearURL(reURL) + "$" ),
 			FullName: fullName,
@@ -107,40 +118,59 @@ func (s *HTTPServer) buildTemps(){
 	s.paths.temps = make(map[string]tempPaths)
 }
 
-func (s *HTTPServer) Listen(){
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		s.handler(&w, r, false)
-	})
-
-	if s.WebSocket != nil {
-		s.WebSocket.Perfix = ClearURL(s.WebSocket.Perfix)
-		
-		mux.HandleFunc(s.WebSocket.Perfix, func(w http.ResponseWriter, r *http.Request) {
-			s.handler(&w, r, true)
+func (s *HTTPServer) Listen(proxyAddress, unixSocketPath string){
+	if unixSocketPath != "" {
+		if _, err := os.Stat(unixSocketPath); err == nil {
+			err := os.Remove(unixSocketPath)
+			if err != nil {
+				log.Fatalf("Failed to remove existing socket file: %v", err)
+			}
+		}
+	
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			s.handler(&w, r)
 		})
+		
+		listener, err := net.Listen("unix", unixSocketPath)
+		if err != nil {
+			log.Fatalf("Error creating Unix socket: %v", err)
+		}
+
+		defer listener.Close()
+		err = os.Chmod(unixSocketPath, 0666)
+		if err != nil {
+			log.Fatal("Error setting socket permissions:", err)
+		}
+		
+		go func ()  {
+			if err := http.Serve(listener, mux); err != nil {
+				log.Fatalf("Failed to start HTTP server on Unix socket: %v", err)
+			}
+		}()
+	}
+	
+	if proxyAddress != ""{
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			s.handler(&w, r)
+		})
+		
+		go http.ListenAndServe(proxyAddress, mux)	
 	}
 
-	http.ListenAndServe(s.Addr, mux)
+	select{}
 }
 
-func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket bool){
-
+func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request){
 	url := ClearURL(r.URL.Path)
 
 	var path *Path
-	var params map[string] string
-	if webSocket{
-		unPerfix := strings.TrimPrefix(url, s.WebSocket.Perfix)
-		if !strings.HasPrefix("/", unPerfix){
-			unPerfix = "/" + unPerfix
-		}
-		path, params = s.getPathAndParams(unPerfix)
-	}else{
-		path, params = s.getPathAndParams(url)
-	}
+	
+	isws := r.Header.Get("Upgrade") == "websocket"
 
-		
+	path, params := s.getPathAndParams(url, isws)
+
 	pathDetailsData := &pathDetails{}
 	if path != nil{
 		pathDetailsData.ID = path.ID
@@ -149,10 +179,10 @@ func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket 
 	}else{
 		pathDetailsData = nil
 	}
-
+	
 	request := HTTPRequest{
 		HTTP: r,
-		Params: &params,
+		Params: params,
 		FullName: url,
 		PathDetails: pathDetailsData,
 	}
@@ -164,8 +194,9 @@ func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket 
 	if s.HandleMiddleware(&request, &response){
 		return
 	}
-
+	
 	if path == nil{
+
 		s.on404(&request, &response)
 		return
 	}else if !path.MethodAllowed(HTTPMethod(r.Method)){
@@ -173,60 +204,69 @@ func (s *HTTPServer) handler(w *http.ResponseWriter, r *http.Request, webSocket 
 		return
 	}
 
-	if webSocket{
-		conn, err := s.WebSocket.Upgrader.Upgrade(*w, r, nil)
-		
+	if isws{
+		conn, err := path.WebSocket.Upgrader.Upgrade(*w, r, nil)
 		ws := WSConnection{
 			Conn: conn,
 			Err: err,
 		}
-
-		path.WSHandler(&request, &ws)
+		path.WebSocket.Handler(&request, &ws)
 		return
 	}
 	path.Handler(&request, &response)
 }
 
-func (s *HTTPServer) getPathAndParams(u string) (*Path, map[string] string){
-	params := make(map[string]string)
+func (s *HTTPServer) getPathAndParams(u string, isws bool) (*Path, map[string] string){
+	params := map[string]string{}
+
 	if v, ok := s.paths.static[u]; ok{
+		 
+		if v.Handler == nil && !isws{
+			return nil, params
+		}
+
+		if v.WebSocket.Handler == nil && isws{
+			return nil, params
+		}
+
 		return &v, params
-	}else{
+	}
 
-		for k, vP := range s.paths.regex {
-			if !strings.HasPrefix(u, k){
-				continue
-			}
 
-			paramStr :=  "/" + strings.TrimPrefix(u, k)
+	for k, vP := range s.paths.regex {	
+		if !strings.HasPrefix(u, k){
+			continue
+		}
+		
+		paramStr :=  "/" + strings.TrimPrefix(u, k)
+
+		for _, v := range vP {
 			
-			for _, v := range vP {
-				
-				if !v.RegexName.MatchString(paramStr) {  
-					continue
-				}
-				parts := strings.Split(paramStr, "/")
+			if !v.RegexName.MatchString(paramStr) {  
+				continue
+			} 	
+			
+			parts 		  := strings.Split(paramStr, "/")
+			nonEmptyParts := parts[1:len(parts)-1]
+			lenParts 	  := len(nonEmptyParts)
 
-				nonEmptyParts := []string{}
-				for _, v := range parts {
-					trimmed := strings.TrimSpace(v)
-					if trimmed != "" {
-						nonEmptyParts = append(nonEmptyParts, trimmed)
+			if lenParts != 0{
+				for id, index := range v.paramList {
+					if index <= (lenParts - 1) {
+						params[id] = nonEmptyParts[index]
 					}
-				}
-
-				lenParts := len(nonEmptyParts)
-
-				if lenParts != 0{
-					for id, index := range v.paramList {
-						if index <= (lenParts - 1) {
-							params[id] = nonEmptyParts[index]
-						}
-					}	
-				}
-
-				return &v.Path, params
+				}	
 			}
+			
+			if v.Path.Handler == nil && !isws{
+				return nil, params
+			}
+	
+			if v.Path.WebSocket.Handler == nil && isws{
+				return nil, params
+			}
+
+			return &v.Path, params
 		}
 	}
 
@@ -258,4 +298,8 @@ func (s *HTTPServer) on403(request *HTTPRequest, response *HTTPResponse){
 		return
 	}
 	response.String("")
+}
+
+func onWSUpgradeErr(w http.ResponseWriter, r *http.Request, status int, reason error) {
+	w.WriteHeader(400)
 }
