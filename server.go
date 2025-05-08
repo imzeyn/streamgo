@@ -100,24 +100,36 @@ func (s *Server[PayloadType]) BuildPaths(paths []Path[PayloadType], perfix strin
 	}
 
 }
-
-func (s *Server[PayloadType]) Listen(addr, unixSocketPath string) {
-
-	for _, v := range s.Paths.Regex {
-		v.SplitedList = SplitArray(v.List, s.RegexOptions.ParallelSearchCount)
-		v.SplitedListLen = len(v.SplitedList)
+func (s *Server[PayloadType]) Listen(ctx context.Context, addr, unixSocketPath string) {
+	// Regex yollarını işle
+	for i := range s.Paths.Regex {
+		s.Paths.Regex[i].SplitedList = SplitArray(s.Paths.Regex[i].List, s.RegexOptions.ParallelSearchCount)
+		s.Paths.Regex[i].SplitedListLen = len(s.Paths.Regex[i].SplitedList)
 	}
 
-	var httpmux *http.ServeMux = http.NewServeMux()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.mainHandler)
+
+	errCh := make(chan error, 2)
 
 	if addr != "" {
-		go http.ListenAndServe(addr, httpmux)
+		s.TCPServer = &http.Server{Addr: addr, Handler: mux}
+		go func() {
+			go func() {
+				<-ctx.Done()
+				if err := s.TCPServer.Close(); err != nil {
+					log.Printf("Error closing TCP server: %v", err)
+				}
+			}()
+			if err := s.TCPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
 	}
 
 	if unixSocketPath != "" {
 		if _, err := os.Stat(unixSocketPath); err == nil {
-			err := os.Remove(unixSocketPath)
-			if err != nil {
+			if err := os.Remove(unixSocketPath); err != nil {
 				log.Fatalf("Failed to remove existing socket file: %v", err)
 			}
 		}
@@ -126,24 +138,36 @@ func (s *Server[PayloadType]) Listen(addr, unixSocketPath string) {
 		if err != nil {
 			log.Fatalf("Error creating Unix socket: %v", err)
 		}
+		s.unixListener = listener
 
-		defer listener.Close()
-		err = os.Chmod(unixSocketPath, 0666)
-		if err != nil {
-			log.Fatal("Error setting socket permissions:", err)
+		if err := os.Chmod(unixSocketPath, 0666); err != nil {
+			log.Fatalf("Error setting socket permissions: %v", err)
 		}
 
+		s.UnixSocketServer = &http.Server{Handler: mux}
 		go func() {
-			if err := http.Serve(listener, httpmux); err != nil {
-				log.Fatalf("Failed to start HTTP server on Unix socket: %v", err)
+			go func() {
+				<-ctx.Done()
+				if err := s.UnixSocketServer.Close(); err != nil {
+					log.Printf("Error closing Unix socket server: %v", err)
+				}
+			}()
+			if err := s.UnixSocketServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+				errCh <- err
 			}
 		}()
-
 	}
 
-	if addr != "" || unixSocketPath != "" {
-		httpmux.HandleFunc("/", s.mainHandler)
-		select {}
+	if addr == "" && unixSocketPath == "" {
+		log.Println("No address or Unix socket path provided; exiting")
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Println("Server stopped due to context cancellation")
+	case err := <-errCh:
+		log.Fatalf("Server error: %v", err)
 	}
 }
 
