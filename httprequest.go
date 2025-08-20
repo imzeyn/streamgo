@@ -60,29 +60,63 @@ func (r *HTTPRequest) Header(name string) string {
 	return r.HTTP.Header.Get(name)
 }
 
-func (r *HTTPRequest) IP() string {
-	forwarded := r.HTTP.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		ip := strings.TrimSpace(ips[0])
-		if net.ParseIP(ip) != nil {
-			return ip
-		}
-	}
+// IP returns the real client IP considering X-Forwarded-For, X-Real-IP, and RemoteAddr.
+// trustedProxies is a list of IPs or CIDRs for proxies we trust.
+func (r *HTTPRequest) IP(trustedProxies []string) string {
+    // Parse trusted proxies into net.IPNet
+    var trustedNets []*net.IPNet
+    for _, cidr := range trustedProxies {
+        if _, network, err := net.ParseCIDR(cidr); err == nil {
+            trustedNets = append(trustedNets, network)
+        } else if ip := net.ParseIP(cidr); ip != nil {
+            trustedNets = append(trustedNets, &net.IPNet{
+                IP:   ip,
+                Mask: net.CIDRMask(32, 32),
+            })
+        }
+    }
 
-	realIP := r.HTTP.Header.Get("X-Real-IP")
-	if realIP != "" {
-		if net.ParseIP(realIP) != nil {
-			return realIP
-		}
-	}
+    // Helper: check if IP is in trusted proxies
+    isTrusted := func(ip net.IP) bool {
+        for _, net := range trustedNets {
+            if net.Contains(ip) {
+                return true
+            }
+        }
+        return false
+    }
 
-	ip, _, err := net.SplitHostPort(r.HTTP.RemoteAddr)
-	if err != nil {
-		return ""
-	}
+    // 1. X-Forwarded-For
+    forwarded := r.HTTP.Header.Get("X-Forwarded-For")
+    if forwarded != "" {
+        ips := strings.Split(forwarded, ",")
+        // Traverse from right to left: last IP is closest proxy
+        for i := len(ips) - 1; i >= 0; i-- {
+            ip := strings.TrimSpace(ips[i])
+            parsedIP := net.ParseIP(ip)
+            if parsedIP == nil {
+                continue
+            }
+            if !isTrusted(parsedIP) {
+                return ip // First non-trusted IP is real client
+            }
+        }
+    }
 
-	return ip
+    // 2. X-Real-IP
+    realIP := r.HTTP.Header.Get("X-Real-IP")
+    if realIP != "" {
+        if parsedIP := net.ParseIP(realIP); parsedIP != nil && !isTrusted(parsedIP) {
+            return realIP
+        }
+    }
+
+    // 3. Fallback: RemoteAddr
+    ip, _, err := net.SplitHostPort(r.HTTP.RemoteAddr)
+    if err != nil {
+        return r.HTTP.RemoteAddr
+    }
+    return ip
 }
 
 func (r *HTTPRequest) Method() string {
