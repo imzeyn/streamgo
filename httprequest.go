@@ -52,8 +52,8 @@ func (r *HTTPRequest) Cookie(name string) (*http.Cookie, bool) {
 	return cookie, exists
 }
 
-func (r *HTTPRequest) Headers() *http.Header {
-	return &r.HTTP.Header
+func (r *HTTPRequest) Headers() http.Header {
+	return r.HTTP.Header
 }
 
 func (r *HTTPRequest) Header(name string) string {
